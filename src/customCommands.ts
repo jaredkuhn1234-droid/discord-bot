@@ -55,7 +55,7 @@ export const deleteCustomCommand = async (guildId: string, name: string): Promis
     guildId,
     name.toLowerCase()
   ]);
-  return result.rowCount ? result.rowCount > 0 : false;
+  return (result.rowCount ?? 0) > 0;
 };
 
 export const listCustomCommands = async (guildId: string): Promise<CustomCommand[]> => {
