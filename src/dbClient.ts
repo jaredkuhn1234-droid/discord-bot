@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, QueryResultRow } from 'pg';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -13,6 +13,6 @@ export const pool = new Pool({
   ssl: useSsl ? { rejectUnauthorized: false } : undefined
 });
 
-export const query = async <T = unknown>(text: string, params: unknown[] = []): Promise<{ rows: T[]; rowCount: number | null }> => {
+export const query = async <T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []): Promise<{ rows: T[]; rowCount: number | null }> => {
   return pool.query<T>(text, params);
 };
