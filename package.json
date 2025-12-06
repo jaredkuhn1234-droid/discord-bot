@@ -1,0 +1,37 @@
+{
+  "name": "discord-bot-v1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write ."
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.5.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "sqlite3": "^5.1.7",
+    "winston": "^3.18.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/jest": "^30.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/parser": "^8.15.0",
+    "eslint": "^9.11.1",
+    "eslint-config-prettier": "^9.1.0",
+    "jest": "^30.2.0",
+    "prettier": "^3.3.3",
+    "ts-jest": "^29.4.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}

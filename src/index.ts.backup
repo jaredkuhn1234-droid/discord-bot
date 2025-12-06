@@ -1,0 +1,569 @@
+import dotenv from 'dotenv';
+import {
+  ChatInputCommandInteraction,
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  REST,
+  Routes,
+  EmbedBuilder,
+  GuildMember,
+  PermissionsBitField
+} from 'discord.js';
+import { initDb, getGuildConfig, setGuildConfig, addWarning, getWarnings, logModAction } from './db.js';
+
+dotenv.config();
+initDb();
+
+const token = process.env.DISCORD_TOKEN;
+const clientId = process.env.DISCORD_CLIENT_ID;
+const guildId = process.env.DISCORD_GUILD_ID;
+const defaultPrefix = process.env.COMMAND_PREFIX || '!';
+
+if (!token) {
+  console.error('Missing DISCORD_TOKEN in environment variables.');
+  process.exit(1);
+}
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages
+  ]
+});
+
+const startedAt = Date.now();
+
+const eightBallResponses = [
+  'It is certain.',
+  'Without a doubt.',
+  'You may rely on it.',
+  'Most likely.',
+  'Outlook good.',
+  'Reply hazy, try again.',
+  'Ask again later.',
+  'Better not tell you now.',
+  'Don\'t count on it.',
+  'My reply is no.',
+  'Very doubtful.'
+];
+
+const jokes = [
+  'Why don\'t scientists trust atoms? Because they make up everything!',
+  'Why did the scarecrow win an award? He was outstanding in his field!',
+  'What did the ocean say to the beach? Nothing, it just waved.',
+  'Why don\'t eggs tell jokes? They\'d crack each other up.',
+  'What do you call a fake noodle? An impasta!'
+];
+
+const log = (level: 'info' | 'warn' | 'error', message: string) => {
+  const ts = new Date().toISOString();
+  // eslint-disable-next-line no-console
+  console[level](`[${ts}] ${message}`);
+};
+
+const formatUptime = () => {
+  const diff = Date.now() - startedAt;
+  const seconds = Math.floor(diff / 1000) % 60;
+  const minutes = Math.floor(diff / (1000 * 60)) % 60;
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  return `${hours}h ${minutes}m ${seconds}s`;
+};
+
+const parseRoll = (raw: string) => {
+  const match = raw.match(/^(\d+)?d(\d+)$/i);
+  const count = Math.min(Number(match?.[1] || 1), 10);
+  const sides = Number(match?.[2] || 20);
+  if (!match || count < 1 || sides < 2 || sides > 1000) {
+    return null;
+  }
+  const rolls: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    rolls.push(Math.floor(Math.random() * sides) + 1);
+  }
+  return { raw, rolls, total: rolls.reduce((sum, n) => sum + n, 0) };
+};
+
+const getPrefix = (guildId?: string) => {
+  if (!guildId) return defaultPrefix;
+  const config = getGuildConfig(guildId);
+  return (config?.prefix as string) || defaultPrefix;
+};
+
+const isModerator = (member: GuildMember | null) => {
+  if (!member) return false;
+  return member.permissions.has(PermissionsBitField.Flags.ModerateMembers) || member.permissions.has(PermissionsBitField.Flags.Administrator);
+};
+
+const registerSlashCommands = async () => {
+  if (!clientId) {
+    log('warn', 'DISCORD_CLIENT_ID missing; slash commands not registered.');
+    return;
+  }
+
+  const commands = [
+    { name: 'ping', description: 'Reply with Pong!' },
+    { name: 'help', description: 'List available commands' },
+    { name: 'uptime', description: 'Show bot uptime' },
+    {
+      name: 'roll',
+      description: 'Roll dice (e.g. 1d20)',
+      options: [{ name: 'dice', description: 'Dice notation like 1d20', type: 3, required: false }]
+    },
+    {
+      name: 'eightball',
+      description: 'Ask the magic 8-ball',
+      options: [{ name: 'question', description: 'Your question', type: 3, required: true }]
+    },
+    { name: 'server', description: 'Show server info (guild only)' },
+    { name: 'joke', description: 'Get a random joke' },
+    { name: 'flip', description: 'Flip a coin' },
+    {
+      name: 'pick',
+      description: 'Pick from options',
+      options: [{ name: 'options', description: 'Comma-separated options', type: 3, required: true }]
+    },
+    {
+      name: 'userinfo',
+      description: 'Get user info',
+      options: [{ name: 'user', description: 'User to lookup', type: 6, required: false }]
+    },
+    { name: 'botinfo', description: 'Get bot info' },
+    {
+      name: 'avatar',
+      description: 'Get a user\'s avatar',
+      options: [{ name: 'user', description: 'User to lookup', type: 6, required: false }]
+    },
+    {
+      name: 'warn',
+      description: 'Warn a user',
+      options: [
+        { name: 'user', description: 'User to warn', type: 6, required: true },
+        { name: 'reason', description: 'Reason for warning', type: 3, required: false }
+      ]
+    },
+    {
+      name: 'warnings',
+      description: 'Check user warnings',
+      options: [{ name: 'user', description: 'User to check', type: 6, required: false }]
+    },
+    {
+      name: 'kick',
+      description: 'Kick a user',
+      options: [
+        { name: 'user', description: 'User to kick', type: 6, required: true },
+        { name: 'reason', description: 'Reason for kick', type: 3, required: false }
+      ]
+    },
+    {
+      name: 'ban',
+      description: 'Ban a user',
+      options: [
+        { name: 'user', description: 'User to ban', type: 6, required: true },
+        { name: 'reason', description: 'Reason for ban', type: 3, required: false }
+      ]
+    },
+    {
+      name: 'welcome',
+      description: 'Set welcome message channel',
+      options: [{ name: 'channel', description: 'Channel for welcome messages', type: 7, required: true }]
+    }
+  ];
+
+  try {
+    const rest = new REST({ version: '10' }).setToken(token);
+    if (guildId) {
+      await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+      log('info', `Slash commands registered to guild ${guildId} (instant).`);
+    } else {
+      await rest.put(Routes.applicationCommands(clientId), { body: commands });
+      log('info', 'Slash commands registered globally (may take up to 1 hour).');
+    }
+  } catch (err) {
+    log('error', `Failed to register slash commands: ${String(err)}`);
+  }
+};
+
+const handleMessageCommand = async (msg: Message, prefix: string) => {
+  const content = msg.content.trim();
+  if (!content.startsWith(prefix)) return false;
+
+  const withoutPrefix = content.slice(prefix.length);
+  const args = withoutPrefix.split(/\s+/);
+  const cmd = args[0]?.toLowerCase();
+  if (!cmd) return false;
+
+  try {
+    switch (cmd) {
+      case 'ping':
+        await msg.reply('Pong!');
+        return true;
+      case 'help':
+        await msg.reply(
+          [
+            'Prefix Commands:',
+            `\`${prefix}ping\`, \`${prefix}help\`, \`${prefix}uptime\`,`,
+            `\`${prefix}roll 1d20\`, \`${prefix}8ball <q>\`, \`${prefix}server\`,`,
+            `\`${prefix}joke\`, \`${prefix}flip\`, \`${prefix}pick a b c\`,`,
+            `\`${prefix}userinfo\`, \`${prefix}botinfo\`, \`${prefix}avatar\`,`,
+            `\`${prefix}warn @user\`, \`${prefix}warnings\`, \`${prefix}kick @user\`, \`${prefix}ban @user\``
+          ].join('\n')
+        );
+        return true;
+      case 'uptime':
+        await msg.reply(`Uptime: ${formatUptime()}`);
+        return true;
+      case 'roll': {
+        const dice = args[1] || '1d20';
+        const result = parseRoll(dice);
+        if (!result) {
+          await msg.reply('Use format `1d20` (max 10 dice, 1000 sides).');
+          return true;
+        }
+        await msg.reply(`Rolled ${result.raw}: [${result.rolls.join(', ')}] (total ${result.total})`);
+        return true;
+      }
+      case '8ball': {
+        const question = withoutPrefix.slice(cmd.length).trim();
+        if (!question) {
+          await msg.reply('Ask a question!');
+          return true;
+        }
+        const choice = eightBallResponses[Math.floor(Math.random() * eightBallResponses.length)];
+        await msg.reply(choice);
+        return true;
+      }
+      case 'server':
+        await msg.reply(`Server: ${msg.guild?.name || 'N/A'} | Members: ${msg.guild?.memberCount || 'N/A'}`);
+        return true;
+      case 'joke':
+        await msg.reply(jokes[Math.floor(Math.random() * jokes.length)]);
+        return true;
+      case 'flip':
+        await msg.reply(Math.random() > 0.5 ? 'Heads!' : 'Tails!');
+        return true;
+      case 'pick': {
+        const options = withoutPrefix.slice(cmd.length).trim().split(/\s+/);
+        if (options.length < 2) {
+          await msg.reply('Provide at least 2 options.');
+          return true;
+        }
+        await msg.reply(`I pick: **${options[Math.floor(Math.random() * options.length)]}**`);
+        return true;
+      }
+      case 'userinfo': {
+        const user = msg.mentions.users.first() || msg.author;
+        const embed = new EmbedBuilder()
+          .setTitle(`User Info: ${user.username}`)
+          .setDescription(`ID: ${user.id}`)
+          .addFields(
+            { name: 'Created', value: user.createdAt.toDateString(), inline: true },
+            { name: 'Bot', value: user.bot ? 'Yes' : 'No', inline: true }
+          )
+          .setThumbnail(user.displayAvatarURL());
+        await msg.reply({ embeds: [embed] });
+        return true;
+      }
+      case 'botinfo': {
+        const embed = new EmbedBuilder()
+          .setTitle('Bot Info')
+          .addFields(
+            { name: 'Uptime', value: formatUptime(), inline: true },
+            { name: 'Guilds', value: String(client.guilds.cache.size), inline: true }
+          );
+        await msg.reply({ embeds: [embed] });
+        return true;
+      }
+      case 'avatar': {
+        const user = msg.mentions.users.first() || msg.author;
+        await msg.reply(user.displayAvatarURL({ size: 1024 }));
+        return true;
+      }
+      case 'warn': {
+        if (!msg.guild || !isModerator(msg.member as GuildMember)) {
+          await msg.reply('You need mod perms.');
+          return true;
+        }
+        const user = msg.mentions.users.first();
+        if (!user) {
+          await msg.reply('Mention a user to warn.');
+          return true;
+        }
+        const reason = args.slice(2).join(' ') || 'No reason';
+        addWarning(msg.guild.id, user.id, reason);
+        logModAction(msg.guild.id, 'warn', user.id, msg.author.id, reason);
+        await msg.reply(`Warned ${user.username}: ${reason}`);
+        return true;
+      }
+      case 'warnings': {
+        if (!msg.guild) {
+          await msg.reply('Guild only.');
+          return true;
+        }
+        const user = msg.mentions.users.first() || msg.author;
+        const warns = getWarnings(msg.guild.id, user.id) as Array<Record<string, unknown>>;
+        await msg.reply(`${user.username} has ${warns.length} warning(s).`);
+        return true;
+      }
+      case 'kick': {
+        if (!msg.guild || !isModerator(msg.member as GuildMember)) {
+          await msg.reply('You need mod perms.');
+          return true;
+        }
+        const user = msg.mentions.users.first();
+        if (!user) {
+          await msg.reply('Mention a user to kick.');
+          return true;
+        }
+        const reason = args.slice(2).join(' ') || 'No reason';
+        try {
+          const member = await msg.guild.members.fetch(user.id);
+          await member.kick(reason);
+          logModAction(msg.guild.id, 'kick', user.id, msg.author.id, reason);
+          await msg.reply(`Kicked ${user.username}: ${reason}`);
+        } catch (err) {
+          await msg.reply(`Failed to kick: ${String(err)}`);
+        }
+        return true;
+      }
+      case 'ban': {
+        if (!msg.guild || !isModerator(msg.member as GuildMember)) {
+          await msg.reply('You need mod perms.');
+          return true;
+        }
+        const user = msg.mentions.users.first();
+        if (!user) {
+          await msg.reply('Mention a user to ban.');
+          return true;
+        }
+        const reason = args.slice(2).join(' ') || 'No reason';
+        try {
+          await msg.guild.bans.create(user.id, { reason });
+          logModAction(msg.guild.id, 'ban', user.id, msg.author.id, reason);
+          await msg.reply(`Banned ${user.username}: ${reason}`);
+        } catch (err) {
+          await msg.reply(`Failed to ban: ${String(err)}`);
+        }
+        return true;
+      }
+      default:
+        return false;
+    }
+  } catch (err) {
+    log('error', `Message command failed: ${String(err)}`);
+    await msg.reply('Something went wrong.').catch(() => undefined);
+    return true;
+  }
+};
+
+const handleSlashCommand = async (interaction: ChatInputCommandInteraction) => {
+  try {
+    switch (interaction.commandName) {
+      case 'ping':
+        await interaction.reply('Pong!');
+        break;
+      case 'help':
+        await interaction.reply('All commands available via `/`. Try `/userinfo`, `/roll`, `/joke`, `/warn`, `/kick`, `/ban`, etc.');
+        break;
+      case 'uptime':
+        await interaction.reply(`Uptime: ${formatUptime()}`);
+        break;
+      case 'roll': {
+        const dice = interaction.options.getString('dice') || '1d20';
+        const result = parseRoll(dice);
+        if (!result) {
+          await interaction.reply({ content: 'Invalid format', ephemeral: true });
+          break;
+        }
+        await interaction.reply(`Rolled ${result.raw}: [${result.rolls.join(', ')}] (total ${result.total})`);
+        break;
+      }
+      case 'eightball': {
+        const q = interaction.options.getString('question');
+        const choice = eightBallResponses[Math.floor(Math.random() * eightBallResponses.length)];
+        await interaction.reply(choice);
+        break;
+      }
+      case 'server':
+        await interaction.reply(`Server: ${interaction.guild?.name || 'N/A'} | Members: ${interaction.guild?.memberCount || 'N/A'}`);
+        break;
+      case 'joke':
+        await interaction.reply(jokes[Math.floor(Math.random() * jokes.length)]);
+        break;
+      case 'flip':
+        await interaction.reply(Math.random() > 0.5 ? 'Heads!' : 'Tails!');
+        break;
+      case 'pick': {
+        const opts = interaction.options.getString('options')?.split(',').map((o) => o.trim()) || [];
+        if (opts.length < 2) {
+          await interaction.reply({ content: 'Provide at least 2 options', ephemeral: true });
+          break;
+        }
+        await interaction.reply(`I pick: **${opts[Math.floor(Math.random() * opts.length)]}**`);
+        break;
+      }
+      case 'userinfo': {
+        const user = interaction.options.getUser('user') || interaction.user;
+        const embed = new EmbedBuilder()
+          .setTitle(`User Info: ${user.username}`)
+          .setDescription(`ID: ${user.id}`)
+          .addFields(
+            { name: 'Created', value: user.createdAt.toDateString(), inline: true },
+            { name: 'Bot', value: user.bot ? 'Yes' : 'No', inline: true }
+          )
+          .setThumbnail(user.displayAvatarURL());
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+      case 'botinfo': {
+        const embed = new EmbedBuilder()
+          .setTitle('Bot Info')
+          .addFields(
+            { name: 'Uptime', value: formatUptime(), inline: true },
+            { name: 'Guilds', value: String(client.guilds.cache.size), inline: true }
+          );
+        await interaction.reply({ embeds: [embed] });
+        break;
+      }
+      case 'avatar': {
+        const user = interaction.options.getUser('user') || interaction.user;
+        await interaction.reply(user.displayAvatarURL({ size: 1024 }));
+        break;
+      }
+      case 'warn': {
+        if (!interaction.guild || !isModerator(interaction.member as GuildMember)) {
+          await interaction.reply({ content: 'You need mod perms', ephemeral: true });
+          break;
+        }
+        const user = interaction.options.getUser('user');
+        const reason = interaction.options.getString('reason') || 'No reason';
+        if (!user) {
+          await interaction.reply({ content: 'User not found', ephemeral: true });
+          break;
+        }
+        addWarning(interaction.guild.id, user.id, reason);
+        logModAction(interaction.guild.id, 'warn', user.id, interaction.user.id, reason);
+        await interaction.reply(`Warned ${user.username}: ${reason}`);
+        break;
+      }
+      case 'warnings': {
+        if (!interaction.guild) {
+          await interaction.reply({ content: 'Guild only', ephemeral: true });
+          break;
+        }
+        const user = interaction.options.getUser('user') || interaction.user;
+        const warns = getWarnings(interaction.guild.id, user.id) as Array<Record<string, unknown>>;
+        await interaction.reply(`${user.username} has ${warns.length} warning(s).`);
+        break;
+      }
+      case 'kick': {
+        if (!interaction.guild || !isModerator(interaction.member as GuildMember)) {
+          await interaction.reply({ content: 'You need mod perms', ephemeral: true });
+          break;
+        }
+        const user = interaction.options.getUser('user');
+        const reason = interaction.options.getString('reason') || 'No reason';
+        if (!user) {
+          await interaction.reply({ content: 'User not found', ephemeral: true });
+          break;
+        }
+        try {
+          const member = await interaction.guild.members.fetch(user.id);
+          await member.kick(reason);
+          logModAction(interaction.guild.id, 'kick', user.id, interaction.user.id, reason);
+          await interaction.reply(`Kicked ${user.username}: ${reason}`);
+        } catch (err) {
+          await interaction.reply({ content: `Failed to kick: ${String(err)}`, ephemeral: true });
+        }
+        break;
+      }
+      case 'ban': {
+        if (!interaction.guild || !isModerator(interaction.member as GuildMember)) {
+          await interaction.reply({ content: 'You need mod perms', ephemeral: true });
+          break;
+        }
+        const user = interaction.options.getUser('user');
+        const reason = interaction.options.getString('reason') || 'No reason';
+        if (!user) {
+          await interaction.reply({ content: 'User not found', ephemeral: true });
+          break;
+        }
+        try {
+          await interaction.guild.bans.create(user.id, { reason });
+          logModAction(interaction.guild.id, 'ban', user.id, interaction.user.id, reason);
+          await interaction.reply(`Banned ${user.username}: ${reason}`);
+        } catch (err) {
+          await interaction.reply({ content: `Failed to ban: ${String(err)}`, ephemeral: true });
+        }
+        break;
+      }
+      case 'welcome': {
+        if (!interaction.guild || !isModerator(interaction.member as GuildMember)) {
+          await interaction.reply({ content: 'You need mod perms', ephemeral: true });
+          break;
+        }
+        const channel = interaction.options.getChannel('channel');
+        if (!channel) {
+          await interaction.reply({ content: 'Channel not found', ephemeral: true });
+          break;
+        }
+        setGuildConfig(interaction.guild.id, { welcome_channel_id: channel.id });
+        await interaction.reply(`Welcome messages will post to ${channel}`);
+        break;
+      }
+      default:
+        await interaction.reply({ content: 'Command not implemented.', ephemeral: true });
+    }
+  } catch (err) {
+    log('error', `Slash command failed: ${String(err)}`);
+    if (interaction.isRepliable()) {
+      await interaction.reply({ content: 'Something went wrong.', ephemeral: true }).catch(() => undefined);
+    }
+  }
+};
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  await handleSlashCommand(interaction);
+});
+
+client.on(Events.MessageCreate, async (msg) => {
+  if (msg.author.bot || !msg.guild) return;
+  const prefix = getPrefix(msg.guild.id);
+  await handleMessageCommand(msg, prefix);
+});
+
+client.on(Events.GuildMemberAdd, async (member) => {
+  if (!member.guild) return;
+  const config = getGuildConfig(member.guild.id);
+  if (config?.welcome_channel_id) {
+    const channel = member.guild.channels.cache.get(config.welcome_channel_id as string);
+    if (channel?.isTextBased()) {
+      const message = (config.welcome_message as string) || `Welcome ${member.user.username}!`;
+      await channel.send(message).catch(() => undefined);
+    }
+  }
+});
+
+client.once(Events.ClientReady, async (readyClient) => {
+  log('info', `Logged in as ${readyClient.user.tag}`);
+  await registerSlashCommands();
+});
+
+const shutdown = async (signal: NodeJS.Signals) => {
+  log('info', `Received ${signal}. Logging out...`);
+  await client.destroy();
+  process.exit(0);
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+client.login(token).catch((error) => {
+  log('error', `Failed to login: ${String(error)}`);
+  process.exit(1);
+});
