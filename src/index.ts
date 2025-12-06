@@ -13,6 +13,7 @@ import {
   TextChannel
 } from 'discord.js';
 import { initDb, getGuildConfig, setGuildConfig, addWarning, getWarnings, logModAction } from './db.js';
+import { closePool } from './dbClient.js';
 import { logger } from './logger.js';
 import { checkRateLimit } from './rateLimit.js';
 import { initAnalytics, trackCommand, trackError, getCommandStats, getActiveUsers, getTotalUsage } from './analytics.js';
@@ -968,8 +969,19 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 const shutdown = async (signal: string) => {
-  logger.info(`Received ${signal}. Logging out...`);
-  await client.destroy();
+  logger.info(`Received ${signal}. Shutting down gracefully...`);
+  try {
+    await client.destroy();
+    logger.info('Discord client destroyed');
+  } catch (err) {
+    logger.error('Error destroying Discord client', err);
+  }
+  try {
+    await closePool();
+    logger.info('Postgres connection pool closed');
+  } catch (err) {
+    logger.error('Error closing Postgres pool', err);
+  }
   process.exit(0);
 };
 
