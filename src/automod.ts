@@ -60,7 +60,7 @@ export const checkAutomod = async (message: Message): Promise<boolean> => {
           });
         }
         
-        logModAction(
+        await logModAction(
           message.guild.id,
           'automod_spam',
           message.author.id,
@@ -87,7 +87,7 @@ export const checkAutomod = async (message: Message): Promise<boolean> => {
           });
         }
         
-        logModAction(
+        await logModAction(
           message.guild.id,
           'automod_caps',
           message.author.id,
@@ -113,7 +113,7 @@ export const checkAutomod = async (message: Message): Promise<boolean> => {
             });
           }
           
-          logModAction(
+          await logModAction(
             message.guild.id,
             'automod_link',
             message.author.id,
@@ -138,7 +138,7 @@ export const checkAutomod = async (message: Message): Promise<boolean> => {
             });
           }
           
-          logModAction(
+          await logModAction(
             message.guild.id,
             'automod_badword',
             message.author.id,

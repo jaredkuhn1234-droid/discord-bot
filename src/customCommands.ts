@@ -1,10 +1,5 @@
-// Custom command manager
-import Database from 'better-sqlite3';
-import path from 'path';
-
-const dbPath = path.join(process.cwd(), 'custom_commands.db');
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
+// Custom command manager (Postgres)
+import { query } from './dbClient.js';
 
 export interface CustomCommand {
   id?: number;
@@ -16,16 +11,16 @@ export interface CustomCommand {
   created_at?: string;
 }
 
-export const initCustomCommands = () => {
-  db.exec(`
+export const initCustomCommands = async () => {
+  await query(`
     CREATE TABLE IF NOT EXISTS custom_commands (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,
       name TEXT NOT NULL,
       response TEXT NOT NULL,
       creator_id TEXT NOT NULL,
       uses INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(guild_id, name)
     );
 
@@ -33,38 +28,56 @@ export const initCustomCommands = () => {
   `);
 };
 
-export const addCustomCommand = (guildId: string, name: string, response: string, creatorId: string): boolean => {
+export const addCustomCommand = async (guildId: string, name: string, response: string, creatorId: string): Promise<boolean> => {
   try {
-    const stmt = db.prepare('INSERT INTO custom_commands (guild_id, name, response, creator_id) VALUES (?, ?, ?, ?)');
-    stmt.run(guildId, name.toLowerCase(), response, creatorId);
+    await query('INSERT INTO custom_commands (guild_id, name, response, creator_id) VALUES ($1, $2, $3, $4)', [
+      guildId,
+      name.toLowerCase(),
+      response,
+      creatorId
+    ]);
     return true;
   } catch {
     return false; // Likely duplicate name
   }
 };
 
-export const getCustomCommand = (guildId: string, name: string): CustomCommand | undefined => {
-  const stmt = db.prepare('SELECT * FROM custom_commands WHERE guild_id = ? AND name = ?');
-  return stmt.get(guildId, name.toLowerCase()) as CustomCommand | undefined;
+export const getCustomCommand = async (guildId: string, name: string): Promise<CustomCommand | undefined> => {
+  const { rows } = await query<CustomCommand>('SELECT * FROM custom_commands WHERE guild_id = $1 AND name = $2', [
+    guildId,
+    name.toLowerCase()
+  ]);
+  return rows[0];
 };
 
-export const deleteCustomCommand = (guildId: string, name: string): boolean => {
-  const stmt = db.prepare('DELETE FROM custom_commands WHERE guild_id = ? AND name = ?');
-  const result = stmt.run(guildId, name.toLowerCase());
-  return result.changes > 0;
+export const deleteCustomCommand = async (guildId: string, name: string): Promise<boolean> => {
+  const { rowCount } = await query('DELETE FROM custom_commands WHERE guild_id = $1 AND name = $2', [
+    guildId,
+    name.toLowerCase()
+  ]);
+  return (rowCount || 0) > 0;
 };
 
-export const listCustomCommands = (guildId: string): CustomCommand[] => {
-  const stmt = db.prepare('SELECT * FROM custom_commands WHERE guild_id = ? ORDER BY uses DESC, name ASC');
-  return stmt.all(guildId) as CustomCommand[];
+export const listCustomCommands = async (guildId: string): Promise<CustomCommand[]> => {
+  const { rows } = await query<CustomCommand>(
+    'SELECT * FROM custom_commands WHERE guild_id = $1 ORDER BY uses DESC, name ASC',
+    [guildId]
+  );
+  return rows;
 };
 
-export const incrementCommandUse = (guildId: string, name: string) => {
-  const stmt = db.prepare('UPDATE custom_commands SET uses = uses + 1 WHERE guild_id = ? AND name = ?');
-  stmt.run(guildId, name.toLowerCase());
+export const incrementCommandUse = async (guildId: string, name: string) => {
+  await query('UPDATE custom_commands SET uses = uses + 1 WHERE guild_id = $1 AND name = $2', [
+    guildId,
+    name.toLowerCase()
+  ]);
 };
 
-export const getCommandStats = (guildId: string) => {
-  const stmt = db.prepare('SELECT COUNT(*) as total, SUM(uses) as total_uses FROM custom_commands WHERE guild_id = ?');
-  return stmt.get(guildId) as { total: number; total_uses: number } | undefined;
+export const getCommandStats = async (guildId: string) => {
+  const { rows } = await query<{ total: number; total_uses: number }>(
+    'SELECT COUNT(*) as total, COALESCE(SUM(uses),0) as total_uses FROM custom_commands WHERE guild_id = $1',
+    [guildId]
+  );
+  const row = rows[0];
+  return row ? { total: Number(row.total), total_uses: Number(row.total_uses) } : undefined;
 };

@@ -170,12 +170,10 @@ Configurable per-guild with these filters:
 
 ### Environment Variables
 Required:
-- `DISCORD_TOKEN` – Bot token from Discord Developer Portal
-- `DISCORD_CLIENT_ID` – Application ID for slash command registration
-- `COMMAND_PREFIX` – Command prefix (default: `!`)
 
 Optional:
-- `NODE_ENV=production` – Disables console logging, uses only file logs
+ - `DATABASE_URL`: Postgres connection string (required for persistence)
+ - `PGSSL` (optional): Set to `true` if your Postgres host requires SSL without CA (common on hosted providers)
 
 ### Hosting Options
 - **Railway**: Node.js support, automatic deployments from GitHub

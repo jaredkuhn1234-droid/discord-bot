@@ -23,10 +23,10 @@ import { initCustomCommands, addCustomCommand, getCustomCommand, deleteCustomCom
 dotenv.config();
 
 try {
-  initDb();
-  initAnalytics();
-  initLevels();
-  initCustomCommands();
+  await initDb();
+  await initAnalytics();
+  await initLevels();
+  await initCustomCommands();
   logger.info('All databases initialized successfully');
 } catch (err) {
   logger.error('Failed to initialize databases', err);
@@ -99,10 +99,10 @@ const parseRoll = (raw: string) => {
   return { raw, rolls, total: rolls.reduce((sum, n) => sum + n, 0) };
 };
 
-const getPrefix = (guildId?: string) => {
+const getPrefix = async (guildId?: string) => {
   if (!guildId) return defaultPrefix;
   try {
-    const config = getGuildConfig(guildId);
+    const config = await getGuildConfig(guildId);
     return (config?.prefix as string) || defaultPrefix;
   } catch (err) {
     logger.error(`Failed to get prefix for guild ${guildId}`, err);
@@ -368,8 +368,8 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
         }
         const reason = args.slice(2).join(' ') || 'No reason';
         try {
-          addWarning(msg.guild.id, user.id, reason);
-          logModAction(msg.guild.id, 'warn', user.id, msg.author.id, reason);
+          await addWarning(msg.guild.id, user.id, reason);
+          await logModAction(msg.guild.id, 'warn', user.id, msg.author.id, reason);
           await msg.reply(`Warned ${user.username}: ${reason}`);
           logger.info(`User ${user.id} warned in guild ${msg.guild.id} by ${msg.author.id}`);
         } catch (err) {
@@ -385,7 +385,7 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
         }
         const user = msg.mentions.users.first() || msg.author;
         try {
-          const warns = getWarnings(msg.guild.id, user.id) as Array<Record<string, unknown>>;
+          const warns = (await getWarnings(msg.guild.id, user.id)) as Array<Record<string, unknown>>;
           await msg.reply(`${user.username} has ${warns.length} warning(s).`);
         } catch (err) {
           logger.error('Failed to fetch warnings', err);
@@ -463,12 +463,12 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
         }
         const user = msg.mentions.users.first() || msg.author;
         try {
-          const userLevel = getUserLevel(msg.guild.id, user.id);
+          const userLevel = await getUserLevel(msg.guild.id, user.id);
           if (!userLevel) {
             await msg.reply(`${user.username} has no level data yet. Keep chatting!`);
             return true;
           }
-          const rank = getUserRank(msg.guild.id, user.id);
+          const rank = await getUserRank(msg.guild.id, user.id);
           const nextLevelXp = xpForNextLevel(userLevel.level);
           const embed = new EmbedBuilder()
             .setColor(0x5865f2)
@@ -493,7 +493,7 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
           return true;
         }
         try {
-          const leaders = getLeaderboard(msg.guild.id, 10);
+          const leaders = await getLeaderboard(msg.guild.id, 10);
           if (leaders.length === 0) {
             await msg.reply('No users have levels yet!');
             return true;
@@ -515,9 +515,9 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
       }
       case 'stats': {
         try {
-          const totalUsage = getTotalUsage(7);
-          const activeUsers = getActiveUsers(7);
-          const cmdStats = getCommandStats(7) as Array<{ command: string; count: number }>;
+          const totalUsage = await getTotalUsage(7);
+          const activeUsers = await getActiveUsers(7);
+          const cmdStats = (await getCommandStats(7)) as Array<{ command: string; count: number }>;
           const topCommands = cmdStats.slice(0, 5);
           
           const embed = new EmbedBuilder()
@@ -549,7 +549,7 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
             return true;
           }
           try {
-            const success = addCustomCommand(msg.guild.id, name, response, msg.author.id);
+            const success = await addCustomCommand(msg.guild.id, name, response, msg.author.id);
             if (success) {
               await msg.reply(`✅ Custom command \`${name}\` created!`);
               logger.info(`Custom command '${name}' created in guild ${msg.guild.id}`);
@@ -569,7 +569,7 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
             return true;
           }
           try {
-            const success = deleteCustomCommand(msg.guild.id, name);
+            const success = await deleteCustomCommand(msg.guild.id, name);
             if (success) {
               await msg.reply(`✅ Custom command \`${name}\` deleted!`);
             } else {
@@ -583,7 +583,7 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
         }
         if (subCmd === 'list') {
           try {
-            const commands = listCustomCommands(msg.guild.id);
+            const commands = await listCustomCommands(msg.guild.id);
             if (commands.length === 0) {
               await msg.reply('No custom commands yet!');
               return true;
@@ -641,11 +641,11 @@ const handleMessageCommand = async (msg: Message, prefix: string) => {
         // Check for custom commands
         if (msg.guild) {
           try {
-            const customCmd = getCustomCommand(msg.guild.id, cmd);
+            const customCmd = await getCustomCommand(msg.guild.id, cmd);
             if (customCmd) {
               await msg.reply(customCmd.response);
-              incrementCommandUse(msg.guild.id, cmd);
-              trackCommand({
+              await incrementCommandUse(msg.guild.id, cmd);
+              await trackCommand({
                 command: cmd,
                 userId: msg.author.id,
                 guildId: msg.guild.id,
@@ -765,8 +765,8 @@ const handleSlashCommand = async (interaction: ChatInputCommandInteraction) => {
           break;
         }
         try {
-          addWarning(interaction.guild.id, user.id, reason);
-          logModAction(interaction.guild.id, 'warn', user.id, interaction.user.id, reason);
+          await addWarning(interaction.guild.id, user.id, reason);
+          await logModAction(interaction.guild.id, 'warn', user.id, interaction.user.id, reason);
           await interaction.reply(`Warned ${user.username}: ${reason}`);
           logger.info(`User ${user.id} warned in guild ${interaction.guild.id} by ${interaction.user.id}`);
         } catch (err) {
@@ -782,7 +782,7 @@ const handleSlashCommand = async (interaction: ChatInputCommandInteraction) => {
         }
         const user = interaction.options.getUser('user') || interaction.user;
         try {
-          const warns = getWarnings(interaction.guild.id, user.id) as Array<Record<string, unknown>>;
+          const warns = (await getWarnings(interaction.guild.id, user.id)) as Array<Record<string, unknown>>;
           await interaction.reply(`${user.username} has ${warns.length} warning(s).`);
         } catch (err) {
           logger.error('Failed to fetch warnings', err);
@@ -809,7 +809,7 @@ const handleSlashCommand = async (interaction: ChatInputCommandInteraction) => {
         try {
           const member = await interaction.guild.members.fetch(user.id);
           await member.kick(reason);
-          logModAction(interaction.guild.id, 'kick', user.id, interaction.user.id, reason);
+          await logModAction(interaction.guild.id, 'kick', user.id, interaction.user.id, reason);
           await interaction.reply(`Kicked ${user.username}: ${reason}`);
           logger.info(`User ${user.id} kicked from guild ${interaction.guild.id} by ${interaction.user.id}`);
         } catch (err) {
@@ -839,7 +839,7 @@ const handleSlashCommand = async (interaction: ChatInputCommandInteraction) => {
         }
         try {
           await interaction.guild.bans.create(user.id, { reason });
-          logModAction(interaction.guild.id, 'ban', user.id, interaction.user.id, reason);
+          await logModAction(interaction.guild.id, 'ban', user.id, interaction.user.id, reason);
           await interaction.reply(`Banned ${user.username}: ${reason}`);
           logger.info(`User ${user.id} banned from guild ${interaction.guild.id} by ${interaction.user.id}`);
         } catch (err) {
@@ -862,7 +862,7 @@ const handleSlashCommand = async (interaction: ChatInputCommandInteraction) => {
           break;
         }
         try {
-          setGuildConfig(interaction.guild.id, { welcome_channel_id: channel.id });
+          await setGuildConfig(interaction.guild.id, { welcome_channel_id: channel.id });
           await interaction.reply(`Welcome messages will post to ${channel}`);
           logger.info(`Welcome channel set to ${channel.id} in guild ${interaction.guild.id}`);
         } catch (err) {
@@ -889,7 +889,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     await handleSlashCommand(interaction);
     // Track analytics
-    trackCommand({
+    await trackCommand({
       command: interaction.commandName,
       userId: interaction.user.id,
       guildId: interaction.guildId || 'dm',
@@ -898,11 +898,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
     // Add XP for slash commands too
     if (interaction.guildId) {
-      addXP(interaction.guildId, interaction.user.id);
+      await addXP(interaction.guildId, interaction.user.id);
     }
   } catch (err) {
     logger.error('Slash command failed', err);
-    trackError({
+    await trackError({
       command: interaction.commandName,
       error: err instanceof Error ? err.message : String(err),
       userId: interaction.user.id,
@@ -919,7 +919,7 @@ client.on(Events.MessageCreate, async (msg) => {
   await checkAutomod(msg);
 
   // Add XP
-  const xpResult = addXP(msg.guild.id, msg.author.id);
+  const xpResult = await addXP(msg.guild.id, msg.author.id);
   if (xpResult?.levelUp) {
     await msg
       .reply(
@@ -929,13 +929,13 @@ client.on(Events.MessageCreate, async (msg) => {
   }
 
   // Handle commands
-  const prefix = getPrefix(msg.guild.id);
+  const prefix = await getPrefix(msg.guild.id);
   const handled = await handleMessageCommand(msg, prefix);
   
   // Track analytics
   if (handled) {
     const cmd = msg.content.split(/\s+/)[0].slice(prefix.length).toLowerCase();
-    trackCommand({
+    await trackCommand({
       command: cmd,
       userId: msg.author.id,
       guildId: msg.guild.id,
@@ -948,7 +948,7 @@ client.on(Events.MessageCreate, async (msg) => {
 client.on(Events.GuildMemberAdd, async (member) => {
   if (!member.guild) return;
   try {
-    const config = getGuildConfig(member.guild.id);
+    const config = await getGuildConfig(member.guild.id);
     if (config?.welcome_channel_id) {
       const channel = member.guild.channels.cache.get(config.welcome_channel_id as string);
       if (channel?.isTextBased()) {
