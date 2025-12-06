@@ -51,11 +51,11 @@ export const getCustomCommand = async (guildId: string, name: string): Promise<C
 };
 
 export const deleteCustomCommand = async (guildId: string, name: string): Promise<boolean> => {
-  const { rowCount } = await query('DELETE FROM custom_commands WHERE guild_id = $1 AND name = $2', [
+  const result = await query('DELETE FROM custom_commands WHERE guild_id = $1 AND name = $2', [
     guildId,
     name.toLowerCase()
   ]);
-  return (rowCount || 0) > 0;
+  return result.rowCount ? result.rowCount > 0 : false;
 };
 
 export const listCustomCommands = async (guildId: string): Promise<CustomCommand[]> => {
